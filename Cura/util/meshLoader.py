@@ -22,6 +22,7 @@ def saveWildcardFilter():
 
 #loadMeshes loads 1 or more printableObjects from a file.
 # STL files are a single printableObject with a single mesh, these are most common.
+# 	stl.loadScene() will compensate for the non-standard scaling ProDesktop exports STL files with.
 # OBJ files usually contain a single mesh, but they can contain multiple meshes
 # AMF can contain whole scenes of objects with each object having multiple meshes.
 # DAE files are a mess, but they can contain scenes of objects as well as grouped meshes
