@@ -4,6 +4,7 @@ __copyright__ = "Copyright (C) 2013 David Braam - Released under terms of the AG
 import time
 import math
 import os
+from Cura import globals
 
 import numpy
 numpy.seterr(all='ignore')
@@ -137,12 +138,18 @@ class printableObject(object):
 			matrix = [[1,0,0], [0, 1, 0], [0, 0, 1]]
 			matrix[axis][axis] = scale
 		self.applyMatrix(numpy.matrix(matrix, numpy.float64))
+		
+	def scaleThree(self):
+		self.applyMatrix(numpy.matrix([[3,0,0],[0,3,0],[0,0,3]], numpy.float64))
 
 	def resetScale(self):
 		x = 1/numpy.linalg.norm(self._matrix[::,0].getA().flatten())
 		y = 1/numpy.linalg.norm(self._matrix[::,1].getA().flatten())
 		z = 1/numpy.linalg.norm(self._matrix[::,2].getA().flatten())
 		self.applyMatrix(numpy.matrix([[x,0,0],[0,y,0],[0,0,z]], numpy.float64))
+		if self in globals.objectsProD: # Special handling of files loaded from ProDesktop STL files
+			self.scaleThree()
+		
 
 	def resetRotation(self):
 		x = numpy.linalg.norm(self._matrix[::,0].getA().flatten())
