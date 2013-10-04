@@ -144,7 +144,7 @@ class TitleRow(object):
 		sizer.SetRows(x + 2)
 
 class SettingRow(object):
-	def __init__(self, panel, configName, valueOverride = None):
+	def __init__(self, panel, configName, valueOverride = None, index = None):
 		"Add a setting to the configuration panel"
 		sizer = panel.GetSizer()
 		x = sizer.GetRows()
@@ -152,6 +152,7 @@ class SettingRow(object):
 		flag = 0
 
 		self.setting = profile.settingsDictionary[configName]
+		self.settingIndex = index
 		self.validationMsg = ''
 		self.panel = panel
 
@@ -168,25 +169,29 @@ class SettingRow(object):
 		#	flag = wx.EXPAND
 		if self.setting.getType() is types.BooleanType:
 			self.ctrl = wx.CheckBox(panel, -1, style=wx.ALIGN_RIGHT)
-			self.SetValue(self.setting.getValue())
+			self.SetValue(self.setting.getValue(self.settingIndex))
 			self.ctrl.Bind(wx.EVT_CHECKBOX, self.OnSettingChange)
 		elif valueOverride is not None and valueOverride is wx.Colour:
 			self.ctrl = wx.ColourPickerCtrl(panel, -1)
-			self.SetValue(self.setting.getValue())
+			self.SetValue(self.setting.getValue(self.settingIndex))
 			self.ctrl.Bind(wx.EVT_COLOURPICKER_CHANGED, self.OnSettingChange)
 		elif type(self.setting.getType()) is list or valueOverride is not None:
-			value = self.setting.getValue()
+			value = self.setting.getValue(self.settingIndex)
 			choices = self.setting.getType()
 			if valueOverride is not None:
 				choices = valueOverride
+			self._englishChoices = choices[:]
 			if value not in choices and len(choices) > 0:
 				value = choices[0]
+			for n in xrange(0, len(choices)):
+				choices[n] = _(choices[n])
+			value = _(value)
 			self.ctrl = wx.ComboBox(panel, -1, value, choices=choices, style=wx.CB_DROPDOWN|wx.CB_READONLY)
 			self.ctrl.Bind(wx.EVT_COMBOBOX, self.OnSettingChange)
 			self.ctrl.Bind(wx.EVT_LEFT_DOWN, self.OnMouseExit)
 			flag = wx.EXPAND
 		else:
-			self.ctrl = wx.TextCtrl(panel, -1, self.setting.getValue())
+			self.ctrl = wx.TextCtrl(panel, -1, self.setting.getValue(self.settingIndex))
 			self.ctrl.Bind(wx.EVT_TEXT, self.OnSettingChange)
 			flag = wx.EXPAND
 
@@ -213,7 +218,7 @@ class SettingRow(object):
 		e.Skip()
 
 	def OnSettingChange(self, e):
-		self.setting.setValue(self.GetValue())
+		self.setting.setValue(self.GetValue(), self.settingIndex)
 		self.panel.main._validate()
 
 	def _validate(self):
@@ -236,6 +241,12 @@ class SettingRow(object):
 	def GetValue(self):
 		if isinstance(self.ctrl, wx.ColourPickerCtrl):
 			return str(self.ctrl.GetColour().GetAsString(wx.C2S_HTML_SYNTAX))
+		elif isinstance(self.ctrl, wx.ComboBox):
+			value = str(self.ctrl.GetValue())
+			for ret in self._englishChoices:
+				if _(ret) == value:
+					return ret
+			return value
 		else:
 			return str(self.ctrl.GetValue())
 
@@ -249,5 +260,7 @@ class SettingRow(object):
 				self.ctrl.SetValue(float(value))
 			except ValueError:
 				pass
+		elif isinstance(self.ctrl, wx.ComboBox):
+			self.ctrl.SetValue(_(value))
 		else:
 			self.ctrl.SetValue(value)

@@ -44,7 +44,7 @@ def getPathForMesh(name):
 def getPathForFirmware(name):
 	return getPathForResource(resourceBasePath, 'firmware', name)
 
-def setupLocalization():
+def setupLocalization(selectedLanguage = None):
 	try:
 		if sys.platform.startswith('darwin'):
 			languages = NSLocale.preferredLanguages()
@@ -54,6 +54,22 @@ def setupLocalization():
 	except Exception as e:
 		languages = ['en']
 
+	if selectedLanguage is not None:
+		for item in getLanguageOptions():
+			if item[1] == selectedLanguage and item[0] is not None:
+				languages = [item[0]]
+
 	locale_path = os.path.normpath(os.path.join(resourceBasePath, 'locale'))
 	translation = gettext.translation('Cura', locale_path, languages, fallback=True)
 	translation.install(unicode=True)
+
+def getLanguageOptions():
+	return [
+		[None, 'System default'],
+		['en', 'English'],
+		['de', 'Deutsch'],
+		['fr', 'French'],
+		['nl', 'Nederlands'],
+		['sp', 'Spanish'],
+		['po', 'Polish']
+	]

@@ -17,7 +17,7 @@ BUILD_TARGET=${1:-all}
 ##Do we need to create the final archive
 ARCHIVE_FOR_DISTRIBUTION=1
 ##Which version name are we appending to the final archive
-BUILD_NAME=13.06.5
+BUILD_NAME=13.10-MultiLanguageTest
 TARGET_DIR=Cura-${BUILD_NAME}-${BUILD_TARGET}
 
 ##Which versions of external programs to use
@@ -138,7 +138,14 @@ fi
 #############################
 
 if [ "$BUILD_TARGET" = "debian" ]; then
-	git clone https://github.com/GreatFruitOmsk/Power
+	if [ ! -d "Power" ]; then
+		git clone https://github.com/GreatFruitOmsk/Power
+	else
+		cd Power
+		git pull
+		cd ..
+	fi
+	rm -rf CuraEngine
 	git clone https://github.com/Ultimaker/CuraEngine
 	make -C CuraEngine
 	rm -rf scripts/linux/debian/usr/share/cura

@@ -8,6 +8,7 @@ import os
 import traceback
 import threading
 import math
+import glob
 
 import OpenGL
 OpenGL.ERROR_CHECKING = False
@@ -137,22 +138,60 @@ class SceneView(openglGui.glGuiPanel):
 
 	def loadSceneFiles(self, filenames):
 		self.youMagineButton.setDisabled(False)
-		if self.viewSelection.getValue() == 4:
-			self.viewSelection.setValue(0)
-			self.OnViewChange()
+		#if self.viewSelection.getValue() == 4:
+		#	self.viewSelection.setValue(0)
+		#	self.OnViewChange()
 		self.loadScene(filenames)
 
 	def loadFiles(self, filenames):
+		mainWindow = self.GetParent().GetParent().GetParent()
+		# only one GCODE file can be active
+		# so if single gcode file, process this
+		# otherwise ignore all gcode files
 		gcodeFilename = None
-		for filename in filenames:
-			self.GetParent().GetParent().GetParent().addToModelMRU(filename)
-			ext = filename[filename.rfind('.')+1:].upper()
-			if ext == 'G' or ext == 'GCODE':
+		if len(filenames) == 1:
+			filename = filenames[0]
+			ext = os.path.splitext(filename)[1].lower()
+			if ext == '.g' or ext == '.gcode':
 				gcodeFilename = filename
+				mainWindow.addToModelMRU(filename)
 		if gcodeFilename is not None:
 			self.loadGCodeFile(gcodeFilename)
 		else:
-			self.loadSceneFiles(filenames)
+			# process directories and special file types
+			# and keep scene files for later processing
+			scene_filenames = []
+			ignored_types = dict()
+			# use file list as queue
+			# pop first entry for processing and append new files at end
+			while filenames:
+				filename = filenames.pop(0)
+				if os.path.isdir(filename):
+					# directory: queue all included files and directories
+					filenames.extend(os.path.join(filename, f) for f in os.listdir(filename))
+				else:
+					ext = os.path.splitext(filename)[1].lower()
+					if ext == '.ini':
+						profile.loadProfile(filename)
+						mainWindow.addToProfileMRU(filename)
+					elif ext in meshLoader.loadSupportedExtensions():
+						scene_filenames.append(filename)
+						mainWindow.addToModelMRU(filename)
+					else:
+						ignored_types[ext] = 1
+			if ignored_types:
+				ignored_types = ignored_types.keys()
+				ignored_types.sort()
+				self.notification.message("ignored: " + " ".join("*" + type for type in ignored_types))
+			mainWindow.updateProfileToAllControls()
+			# now process all the scene files
+			if scene_filenames:
+				self.loadSceneFiles(scene_filenames)
+				self._selectObject(None)
+				self.sceneUpdated()
+				newZoom = numpy.max(self._machineSize)
+				self._animView = openglGui.animation(self, self._viewTarget.copy(), numpy.array([0,0,0], numpy.float32), 0.5)
+				self._animZoom = openglGui.animation(self, self._zoom, newZoom, 0.5)
 
 	def showLoadModel(self, button = 1):
 		if button == 1:
@@ -215,10 +254,9 @@ class SceneView(openglGui.glGuiPanel):
 			self._slicer.submitSliceInfoOnline()
 
 	def showSaveGCode(self):
-		defPath = profile.getPreference('lastFile')
-		defPath = defPath[0:defPath.rfind('.')] + '.gcode'
-		dlg=wx.FileDialog(self, _("Save toolpath"), defPath, style=wx.FD_SAVE)
-		dlg.SetFilename(self._scene._objectList[0].getName())
+		dlg=wx.FileDialog(self, _("Save toolpath"), os.path.dirname(profile.getPreference('lastFile')), style=wx.FD_SAVE)
+		filename = self._scene._objectList[0].getName() + '.gcode'
+		dlg.SetFilename(filename)
 		dlg.SetWildcard('Toolpath (*.gcode)|*.gcode;*.g')
 		if dlg.ShowModal() != wx.ID_OK:
 			dlg.Destroy()
@@ -381,7 +419,7 @@ class SceneView(openglGui.glGuiPanel):
 		if self._focusObj is None:
 			return
 		obj = self._focusObj
-		dlg = wx.NumberEntryDialog(self, "How many copies do you want?", "Copies", "Multiply", 1, 1, 100)
+		dlg = wx.NumberEntryDialog(self, _("How many copies do you want?"), _("Number of copies"), _("Multiply"), 1, 1, 100)
 		if dlg.ShowModal() != wx.ID_OK:
 			dlg.Destroy()
 			return
@@ -1170,7 +1208,7 @@ void main(void)
 					self._platformMesh[machine] = meshes[0]
 				else:
 					self._platformMesh[machine] = None
-				if profile.getMachineSetting('machine_type') == 'ultimaker2':
+				if machine == 'ultimaker2':
 					self._platformMesh[machine]._drawOffset = numpy.array([0,-37,145], numpy.float32)
 				else:
 					self._platformMesh[machine]._drawOffset = numpy.array([0,0,2.5], numpy.float32)
@@ -1178,6 +1216,44 @@ void main(void)
 			self._objectShader.bind()
 			self._renderObject(self._platformMesh[machine], False, False)
 			self._objectShader.unbind()
+
+			#For the Ultimaker 2 render the texture on the back plate to show the Ultimaker2 text.
+			if machine == 'ultimaker2':
+				if not hasattr(self._platformMesh[machine], 'texture'):
+					self._platformMesh[machine].texture = opengl.loadGLTexture('Ultimaker2backplate.png')
+				glBindTexture(GL_TEXTURE_2D, self._platformMesh[machine].texture)
+				glEnable(GL_TEXTURE_2D)
+				glPushMatrix()
+				glColor4f(1,1,1,1)
+
+				glTranslate(0,150,-5)
+				h = 50
+				d = 8
+				w = 100
+				glEnable(GL_BLEND)
+				glBlendFunc(GL_DST_COLOR, GL_ZERO)
+				glBegin(GL_QUADS)
+				glTexCoord2f(1, 0)
+				glVertex3f( w, 0, h)
+				glTexCoord2f(0, 0)
+				glVertex3f(-w, 0, h)
+				glTexCoord2f(0, 1)
+				glVertex3f(-w, 0, 0)
+				glTexCoord2f(1, 1)
+				glVertex3f( w, 0, 0)
+
+				glTexCoord2f(1, 0)
+				glVertex3f(-w, d, h)
+				glTexCoord2f(0, 0)
+				glVertex3f( w, d, h)
+				glTexCoord2f(0, 1)
+				glVertex3f( w, d, 0)
+				glTexCoord2f(1, 1)
+				glVertex3f(-w, d, 0)
+				glEnd()
+				glDisable(GL_TEXTURE_2D)
+				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+				glPopMatrix()
 		else:
 			glColor4f(0,0,0,1)
 			glLineWidth(3)

@@ -14,6 +14,7 @@ from Cura.gui import configWizard
 from Cura.gui import firmwareInstall
 from Cura.gui import simpleMode
 from Cura.gui import sceneView
+from Cura.gui import aboutWindow
 from Cura.gui.util import dropTarget
 #from Cura.gui.tools import batchRun
 from Cura.gui.tools import pidDebugger
@@ -30,7 +31,8 @@ class mainWindow(wx.Frame):
 
 		wx.EVT_CLOSE(self, self.OnClose)
 
-		self.SetDropTarget(dropTarget.FileDropTarget(self.OnDropFiles, meshLoader.loadSupportedExtensions() + ['.g', '.gcode']))
+		# allow dropping any file, restrict later
+		self.SetDropTarget(dropTarget.FileDropTarget(self.OnDropFiles))
 
 		self.normalModeOnlyItems = []
 
@@ -84,18 +86,20 @@ class mainWindow(wx.Frame):
 		self.fileMenu.AppendSeparator()
 		i = self.fileMenu.Append(-1, _("Preferences...\tCTRL+,"))
 		self.Bind(wx.EVT_MENU, self.OnPreferences, i)
+		i = self.fileMenu.Append(-1, _("Machine settings..."))
+		self.Bind(wx.EVT_MENU, self.OnMachineSettings, i)
 		self.fileMenu.AppendSeparator()
 
 		# Model MRU list
 		modelHistoryMenu = wx.Menu()
-		self.fileMenu.AppendMenu(wx.NewId(), _("&Recent Model Files"), modelHistoryMenu)
+		self.fileMenu.AppendMenu(wx.NewId(), '&' + _("Recent Model Files"), modelHistoryMenu)
 		self.modelFileHistory.UseMenu(modelHistoryMenu)
 		self.modelFileHistory.AddFilesToMenu()
 		self.Bind(wx.EVT_MENU_RANGE, self.OnModelMRU, id=self.ID_MRU_MODEL1, id2=self.ID_MRU_MODEL10)
 
 		# Profle MRU list
 		profileHistoryMenu = wx.Menu()
-		self.fileMenu.AppendMenu(wx.NewId(), _("&Recent Profile Files"), profileHistoryMenu)
+		self.fileMenu.AppendMenu(wx.NewId(), _("Recent Profile Files"), profileHistoryMenu)
 		self.profileFileHistory.UseMenu(profileHistoryMenu)
 		self.profileFileHistory.AddFilesToMenu()
 		self.Bind(wx.EVT_MENU_RANGE, self.OnProfileMRU, id=self.ID_MRU_PROFILE1, id2=self.ID_MRU_PROFILE10)
@@ -103,7 +107,7 @@ class mainWindow(wx.Frame):
 		self.fileMenu.AppendSeparator()
 		i = self.fileMenu.Append(wx.ID_EXIT, _("Quit"))
 		self.Bind(wx.EVT_MENU, self.OnQuit, i)
-		self.menubar.Append(self.fileMenu, _("&File"))
+		self.menubar.Append(self.fileMenu, '&' + _("File"))
 
 		toolsMenu = wx.Menu()
 
@@ -121,7 +125,7 @@ class mainWindow(wx.Frame):
 		#self.normalModeOnlyItems.append(i)
 
 		if minecraftImport.hasMinecraft():
-			i = toolsMenu.Append(-1, _("Minecraft import..."))
+			i = toolsMenu.Append(-1, _("Minecraft map import..."))
 			self.Bind(wx.EVT_MENU, self.OnMinecraftImport, i)
 
 		if version.isDevVersion():
@@ -132,16 +136,16 @@ class mainWindow(wx.Frame):
 		self.Bind(wx.EVT_MENU, self.onCopyProfileClipboard,i)
 		self.menubar.Append(toolsMenu, _("Tools"))
 
+		#Machine menu for machine configuration/tooling
+		self.machineMenu = wx.Menu()
+		self.updateMachineMenu()
+
+		self.menubar.Append(self.machineMenu, _("Machine"))
+
 		expertMenu = wx.Menu()
 		i = expertMenu.Append(-1, _("Open expert settings..."))
 		self.normalModeOnlyItems.append(i)
 		self.Bind(wx.EVT_MENU, self.OnExpertOpen, i)
-		expertMenu.AppendSeparator()
-		if firmwareInstall.getDefaultFirmware() is not None:
-			i = expertMenu.Append(-1, _("Install default Marlin firmware"))
-			self.Bind(wx.EVT_MENU, self.OnDefaultMarlinFirmware, i)
-		i = expertMenu.Append(-1, _("Install custom firmware"))
-		self.Bind(wx.EVT_MENU, self.OnCustomFirmware, i)
 		expertMenu.AppendSeparator()
 		i = expertMenu.Append(-1, _("Run first run wizard..."))
 		self.Bind(wx.EVT_MENU, self.OnFirstRunWizard, i)
@@ -150,6 +154,7 @@ class mainWindow(wx.Frame):
 		if self.extruderCount > 1:
 			i = expertMenu.Append(-1, _("Run head offset wizard..."))
 			self.Bind(wx.EVT_MENU, self.OnHeadOffsetWizard, i)
+
 		self.menubar.Append(expertMenu, _("Expert"))
 
 		helpMenu = wx.Menu()
@@ -256,14 +261,16 @@ class mainWindow(wx.Frame):
 					profileString = do.GetText()
 				wx.TheClipboard.Close()
 
-				if "CURA_PROFILE_STRING:" in profileString:
+				startTag = "CURA_PROFILE_STRING:"
+				if startTag in profileString:
 					#print "Found correct syntax on clipboard"
-					profileString = profileString.replace("\n","")
-					profileString = profileString.replace("CURA_PROFILE_STRING:", "")
+					profileString = profileString.replace("\n","").strip()
+					profileString = profileString[profileString.find(startTag)+len(startTag):]
 					if profileString != self.lastTriedClipboard:
+						print profileString
 						self.lastTriedClipboard = profileString
 						profile.setProfileFromString(profileString)
-						print "changed profile"
+						self.scene.notification.message("Loaded new profile from clipboard.")
 						self.updateProfileToAllControls()
 		except:
 			print "Unable to read from clipboard"
@@ -286,7 +293,7 @@ class mainWindow(wx.Frame):
 			# Save normal mode sash
 			self.normalSashPos = self.splitter.GetSashPosition()
 
-			# Change location of sash to width of quick mode pane 
+			# Change location of sash to width of quick mode pane
 			(width, height) = self.simpleSettingsPanel.GetSizer().GetSize()
 			self.splitter.SetSashPosition(width, True)
 
@@ -300,6 +307,12 @@ class mainWindow(wx.Frame):
 
 	def OnPreferences(self, e):
 		prefDialog = preferencesDialog.preferencesDialog(self)
+		prefDialog.Centre()
+		prefDialog.Show()
+		wx.CallAfter(prefDialog.Show)
+
+	def OnMachineSettings(self, e):
+		prefDialog = preferencesDialog.machineSettingsDialog(self)
 		prefDialog.Centre()
 		prefDialog.Show()
 
@@ -336,7 +349,7 @@ class mainWindow(wx.Frame):
 		self.config.SetPath("/ProfileMRU")
 		self.profileFileHistory.Save(self.config)
 		self.config.Flush()
-		# Load Profile	
+		# Load Profile
 		profile.loadProfile(path)
 		self.updateProfileToAllControls()
 
@@ -344,12 +357,47 @@ class mainWindow(wx.Frame):
 		self.profileFileHistory.AddFileToHistory(file)
 		self.config.SetPath("/ProfileMRU")
 		self.profileFileHistory.Save(self.config)
-		self.config.Flush()			
+		self.config.Flush()
 
 	def updateProfileToAllControls(self):
 		self.scene.updateProfileToControls()
 		self.normalSettingsPanel.updateProfileToControls()
 		self.simpleSettingsPanel.updateProfileToControls()
+
+	def reloadSettingPanels(self):
+		self.leftSizer.Detach(self.simpleSettingsPanel)
+		self.leftSizer.Detach(self.normalSettingsPanel)
+		self.simpleSettingsPanel.Destroy()
+		self.normalSettingsPanel.Destroy()
+		self.simpleSettingsPanel = simpleMode.simpleModePanel(self.leftPane, lambda : self.scene.sceneUpdated())
+		self.normalSettingsPanel = normalSettingsPanel(self.leftPane, lambda : self.scene.sceneUpdated())
+		self.leftSizer.Add(self.simpleSettingsPanel, 1)
+		self.leftSizer.Add(self.normalSettingsPanel, 1, wx.EXPAND)
+		self.updateSliceMode()
+		self.updateProfileToAllControls()
+
+	def updateMachineMenu(self):
+		#Remove all items so we can rebuild the menu. Inserting items seems to cause crashes, so this is the safest way.
+		for item in self.machineMenu.GetMenuItems():
+			self.machineMenu.RemoveItem(item)
+
+		#Add a menu item for each machine configuration.
+		for n in xrange(0, profile.getMachineCount()):
+			i = self.machineMenu.Append(n, profile.getMachineSetting('machine_name', n).title(), kind=wx.ITEM_RADIO)
+			if n == int(profile.getPreferenceFloat('active_machine')):
+				i.Check(True)
+			self.Bind(wx.EVT_MENU, lambda e: self.OnSelectMachine(e.GetId()), i)
+
+		self.machineMenu.AppendSeparator()
+		i = self.machineMenu.Append(-1, _("Add new machine..."))
+		self.Bind(wx.EVT_MENU, self.OnAddNewMachine, i)
+
+		#Add tools for machines.
+		self.machineMenu.AppendSeparator()
+		i = self.machineMenu.Append(-1, _("Install custom firmware..."))
+		self.Bind(wx.EVT_MENU, self.OnCustomFirmware, i)
+		i = self.machineMenu.Append(-1, _("Install default Marlin firmware..."))
+		self.Bind(wx.EVT_MENU, self.OnDefaultMarlinFirmware, i)
 
 	def OnLoadProfile(self, e):
 		dlg=wx.FileDialog(self, _("Select profile file to load"), os.path.split(profile.getPreference('lastFile'))[0], style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
@@ -408,7 +456,7 @@ class mainWindow(wx.Frame):
 		firmwareInstall.InstallFirmware()
 
 	def OnCustomFirmware(self, e):
-		if profile.getPreference('machine_type').startswith('ultimaker'):
+		if profile.getMachineSetting('machine_type').startswith('ultimaker'):
 			wx.MessageBox(_("Warning: Installing a custom firmware does not guarantee that you machine will function correctly, and could damage your machine."), _("Firmware update"), wx.OK | wx.ICON_EXCLAMATION)
 		dlg=wx.FileDialog(self, _("Open firmware to upload"), os.path.split(profile.getPreference('lastFile'))[0], style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
 		dlg.SetWildcard("HEX file (*.hex)|*.hex;*.HEX")
@@ -420,8 +468,22 @@ class mainWindow(wx.Frame):
 			firmwareInstall.InstallFirmware(filename)
 
 	def OnFirstRunWizard(self, e):
+		self.Hide()
 		configWizard.configWizard()
-		self.updateProfileToAllControls()
+		self.Show()
+		self.reloadSettingPanels()
+
+	def OnAddNewMachine(self, e):
+		self.Hide()
+		profile.setActiveMachine(profile.getMachineCount())
+		configWizard.configWizard(True)
+		self.Show()
+		self.reloadSettingPanels()
+		self.updateMachineMenu()
+
+	def OnSelectMachine(self, index):
+		profile.setActiveMachine(index)
+		self.reloadSettingPanels()
 
 	def OnBedLevelWizard(self, e):
 		configWizard.bedLevelWizard()
@@ -466,26 +528,9 @@ class mainWindow(wx.Frame):
 			wx.MessageBox(_("You are running the latest version of Cura!"), _("Awesome!"), wx.ICON_INFORMATION)
 
 	def OnAbout(self, e):
-		info = wx.AboutDialogInfo()
-		info.SetName("Cura")
-		info.SetDescription(_("End solution for Open Source Fused Filament Fabrication 3D printing."))
-		info.SetWebSite('http://software.ultimaker.com/')
-		info.SetCopyright(_("Copyright (C) David Braam"))
-		info.SetLicence("""
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Affero General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Affero General Public License for more details.
-
-    You should have received a copy of the GNU Affero General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-""")
-		wx.AboutBox(info)
+		aboutBox = aboutWindow.aboutWindow()
+		aboutBox.Centre()
+		aboutBox.Show()
 
 	def OnClose(self, e):
 		profile.saveProfile(profile.getDefaultProfilePath())
@@ -506,7 +551,7 @@ class mainWindow(wx.Frame):
 				self.normalSashPos = self.splitter.GetSashPosition()
 			profile.putPreference('window_normal_sash', self.normalSashPos)
 
-		#HACK: Set the paint function of the glCanvas to nothing so it won't keep refreshing. Which keeps wxWidgets from quiting.
+		#HACK: Set the paint function of the glCanvas to nothing so it won't keep refreshing. Which can keep wxWidgets from quiting.
 		print "Closing down"
 		self.scene.OnPaint = lambda e : e
 		self.scene._slicer.cleanup()
@@ -536,7 +581,7 @@ class normalSettingsPanel(configBase.configPanelBase):
 		#Plugin page
 		self.pluginPanel = pluginPanel.pluginPanel(self.nb, callback)
 		if len(self.pluginPanel.pluginList) > 0:
-			self.nb.AddPage(self.pluginPanel, "Plugins")
+			self.nb.AddPage(self.pluginPanel, _("Plugins"))
 		else:
 			self.pluginPanel.Show(False)
 
@@ -562,10 +607,9 @@ class normalSettingsPanel(configBase.configPanelBase):
 			n += 1 + len(profile.getSettingsForCategory(category, title))
 			if n > count / 2:
 				p = right
-			configBase.TitleRow(p, title)
+			configBase.TitleRow(p, _(title))
 			for s in profile.getSettingsForCategory(category, title):
-				if s.checkConditions():
-					configBase.SettingRow(p, s.getName())
+				configBase.SettingRow(p, s.getName())
 
 	def SizeLabelWidths(self, left, right):
 		leftWidth = self.getLabelColumnWidth(left)
@@ -577,17 +621,17 @@ class normalSettingsPanel(configBase.configPanelBase):
 	def OnSize(self, e):
 		# Make the size of the Notebook control the same size as this control
 		self.nb.SetSize(self.GetSize())
-		
+
 		# Propegate the OnSize() event (just in case)
 		e.Skip()
-		
+
 		# Perform out resize magic
 		self.UpdateSize(self.printPanel)
 		self.UpdateSize(self.advancedPanel)
-	
+
 	def UpdateSize(self, configPanel):
 		sizer = configPanel.GetSizer()
-		
+
 		# Pseudocde
 		# if horizontal:
 		#     if width(col1) < best_width(col1) || width(col2) < best_width(col2):
@@ -596,7 +640,7 @@ class normalSettingsPanel(configBase.configPanelBase):
 		#     if width(col1) > (best_width(col1) + best_width(col1)):
 		#         switch to horizontal
 		#
-				
+
 		col1 = configPanel.leftPanel
 		colSize1 = col1.GetSize()
 		colBestSize1 = col1.GetBestSize()
@@ -605,7 +649,7 @@ class normalSettingsPanel(configBase.configPanelBase):
 		colBestSize2 = col2.GetBestSize()
 
 		orientation = sizer.GetOrientation()
-		
+
 		if orientation == wx.HORIZONTAL:
 			if (colSize1[0] <= colBestSize1[0]) or (colSize2[0] <= colBestSize2[0]):
 				configPanel.Freeze()

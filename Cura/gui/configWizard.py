@@ -215,15 +215,18 @@ class InfoPage(wx.wizard.WizardPageSimple):
 
 
 class FirstInfoPage(InfoPage):
-	def __init__(self, parent):
-		super(FirstInfoPage, self).__init__(parent, _("First time run wizard"))
-		self.AddText(_("Welcome, and thanks for trying Cura!"))
-		self.AddSeperator()
+	def __init__(self, parent, addNew):
+		if addNew:
+			super(FirstInfoPage, self).__init__(parent, _("Add new machine wizard"))
+		else:
+			super(FirstInfoPage, self).__init__(parent, _("First time run wizard"))
+			self.AddText(_("Welcome, and thanks for trying Cura!"))
+			self.AddSeperator()
 		self.AddText(_("This wizard will help you with the following steps:"))
 		self.AddText(_("* Configure Cura for your machine"))
-		self.AddText(_("* Upgrade your firmware"))
-		self.AddText(_("* Check if your machine is working safely"))
-		self.AddText(_("* Level your printer bed"))
+		self.AddText(_("* Optionally upgrade your firmware"))
+		self.AddText(_("* Optionally check if your machine is working safely"))
+		self.AddText(_("* Optionally level your printer bed"))
 
 		#self.AddText('* Calibrate your machine')
 		#self.AddText('* Do your first print')
@@ -238,6 +241,7 @@ class RepRapInfoPage(InfoPage):
 		self.AddSeperator()
 		self.AddText(_("You will have to manually install Marlin or Sprinter firmware."))
 		self.AddSeperator()
+		self.machineName = self.AddLabelTextCtrl(_("Machine name"), "RepRap")
 		self.machineWidth = self.AddLabelTextCtrl(_("Machine width (mm)"), "80")
 		self.machineDepth = self.AddLabelTextCtrl(_("Machine depth (mm)"), "80")
 		self.machineHeight = self.AddLabelTextCtrl(_("Machine height (mm)"), "60")
@@ -246,19 +250,20 @@ class RepRapInfoPage(InfoPage):
 		self.HomeAtCenter = self.AddCheckbox(_("Bed center is 0,0,0 (RoStock)"))
 
 	def StoreData(self):
-		profile.putPreference('machine_width', self.machineWidth.GetValue())
-		profile.putPreference('machine_depth', self.machineDepth.GetValue())
-		profile.putPreference('machine_height', self.machineHeight.GetValue())
+		profile.putMachineSetting('machine_name', self.machineName.GetValue())
+		profile.putMachineSetting('machine_width', self.machineWidth.GetValue())
+		profile.putMachineSetting('machine_depth', self.machineDepth.GetValue())
+		profile.putMachineSetting('machine_height', self.machineHeight.GetValue())
 		profile.putProfileSetting('nozzle_size', self.nozzleSize.GetValue())
 		profile.putProfileSetting('wall_thickness', float(profile.getProfileSettingFloat('nozzle_size')) * 2)
-		profile.putPreference('has_heated_bed', str(self.heatedBed.GetValue()))
-		profile.putPreference('machine_center_is_zero', str(self.HomeAtCenter.GetValue()))
-		profile.putPreference('extruder_head_size_min_x', '0')
-		profile.putPreference('extruder_head_size_min_y', '0')
-		profile.putPreference('extruder_head_size_max_x', '0')
-		profile.putPreference('extruder_head_size_max_y', '0')
-		profile.putPreference('extruder_head_size_height', '0')
-
+		profile.putMachineSetting('has_heated_bed', str(self.heatedBed.GetValue()))
+		profile.putMachineSetting('machine_center_is_zero', str(self.HomeAtCenter.GetValue()))
+		profile.putMachineSetting('extruder_head_size_min_x', '0')
+		profile.putMachineSetting('extruder_head_size_min_y', '0')
+		profile.putMachineSetting('extruder_head_size_max_x', '0')
+		profile.putMachineSetting('extruder_head_size_max_y', '0')
+		profile.putMachineSetting('extruder_head_size_height', '0')
+		profile.checkAndUpdateMachineName()
 
 class MachineSelectPage(InfoPage):
 	def __init__(self, parent):
@@ -299,12 +304,13 @@ class MachineSelectPage(InfoPage):
 			profile.putMachineSetting('machine_height', '205')
 			profile.putMachineSetting('machine_type', 'ultimaker2')
 			profile.putMachineSetting('machine_center_is_zero', 'False')
+			profile.putMachineSetting('has_heated_bed', 'True')
 			profile.putMachineSetting('gcode_flavor', 'UltiGCode')
 			profile.putProfileSetting('nozzle_size', '0.4')
-			profile.putMachineSetting('extruder_head_size_min_x', '75.0')
-			profile.putMachineSetting('extruder_head_size_min_y', '18.0')
-			profile.putMachineSetting('extruder_head_size_max_x', '18.0')
-			profile.putMachineSetting('extruder_head_size_max_y', '35.0')
+			profile.putMachineSetting('extruder_head_size_min_x', '40.0')
+			profile.putMachineSetting('extruder_head_size_min_y', '10.0')
+			profile.putMachineSetting('extruder_head_size_max_x', '60.0')
+			profile.putMachineSetting('extruder_head_size_max_y', '30.0')
 			profile.putMachineSetting('extruder_head_size_height', '60.0')
 		elif self.UltimakerRadio.GetValue():
 			profile.putMachineSetting('machine_width', '205')
@@ -327,6 +333,7 @@ class MachineSelectPage(InfoPage):
 			profile.putMachineSetting('gcode_flavor', 'RepRap (Marlin/Sprinter)')
 			profile.putPreference('startMode', 'Normal')
 			profile.putProfileSetting('nozzle_size', '0.5')
+		profile.checkAndUpdateMachineName()
 		profile.putProfileSetting('wall_thickness', float(profile.getProfileSetting('nozzle_size')) * 2)
 		if self.SubmitUserStats.GetValue():
 			profile.putPreference('submit_slice_information', 'True')
@@ -761,13 +768,13 @@ class Ultimaker2ReadyPage(InfoPage):
 		self.AddSeperator()
 
 class configWizard(wx.wizard.Wizard):
-	def __init__(self):
+	def __init__(self, addNew = False):
 		super(configWizard, self).__init__(None, -1, "Configuration Wizard")
 
 		self.Bind(wx.wizard.EVT_WIZARD_PAGE_CHANGED, self.OnPageChanged)
 		self.Bind(wx.wizard.EVT_WIZARD_PAGE_CHANGING, self.OnPageChanging)
 
-		self.firstInfoPage = FirstInfoPage(self)
+		self.firstInfoPage = FirstInfoPage(self, addNew)
 		self.machineSelectPage = MachineSelectPage(self)
 		self.ultimakerSelectParts = SelectParts(self)
 		self.ultimakerFirmwareUpgradePage = UltimakerFirmwareUpgradePage(self)

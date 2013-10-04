@@ -19,6 +19,7 @@ from Cura.gui.util import taskbar
 from Cura.util import machineCom
 from Cura.util import gcodeInterpreter
 from Cura.util import resources
+from Cura.util import profile
 
 #The printProcessMonitor is used from the main GUI python process. This monitors the printing python process.
 # This class also handles starting of the 2nd process for printing and all communications with it.
@@ -33,7 +34,7 @@ class printProcessMonitor():
 	def loadFile(self, filename, id):
 		if self.handle is None:
 			if platform.system() == "Darwin" and hasattr(sys, 'frozen'):
-				cmdList = [os.path.join(os.path.dirname(sys.executable), 'Cura')] 
+				cmdList = [os.path.join(os.path.dirname(sys.executable), 'Cura')]
 			else:
 				cmdList = [sys.executable, '-m', 'Cura.cura']
 			cmdList.append('-r')
@@ -42,6 +43,8 @@ class printProcessMonitor():
 				if platform.machine() == 'i386':
 					cmdList.insert(0, 'arch')
 					cmdList.insert(1, '-i386')
+			#Save the preferences before starting the print window so we use the proper machine settings.
+			profile.savePreferences(profile.getPreferencePath())
 			self.handle = subprocess.Popen(cmdList, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 			self.thread = threading.Thread(target=self.Monitor)
 			self.thread.start()
@@ -61,9 +64,10 @@ class printProcessMonitor():
 				elif line.startswith('STATE:'):
 					self._state = line[6:]
 					self._callCallback()
+				else:
+					print '>' + line.rstrip()
 			except:
 				print sys.exc_info()
-			#print '>' + line.rstrip()
 			line = p.stdout.readline()
 		line = p.stderr.readline()
 		while len(line) > 0:
@@ -90,7 +94,7 @@ def startPrintInterface(filename):
 	#startPrintInterface is called from the main script when we want the printer interface to run in a separate process.
 	# It needs to run in a separate process, as any running python code blocks the GCode sender python code (http://wiki.python.org/moin/GlobalInterpreterLock).
 	app = wx.App(False)
-	resources.setupLocalization()
+	resources.setupLocalization(profile.getPreference('language'))
 	printWindowHandle = printWindow()
 	printWindowHandle.Show(True)
 	printWindowHandle.Raise()
@@ -126,6 +130,7 @@ class printWindow(wx.Frame):
 
 	def __init__(self):
 		super(printWindow, self).__init__(None, -1, title=_("Printing"))
+		t = time.time()
 		self.machineCom = None
 		self.gcode = None
 		self.gcodeList = None
@@ -143,10 +148,6 @@ class printWindow(wx.Frame):
 		self.termHistoryIdx = 0
 
 		self.cam = None
-		if webcam.hasWebcamSupport():
-			self.cam = webcam.webcam()
-			if not self.cam.hasCamera():
-				self.cam = None
 
 		self.SetSizer(wx.BoxSizer())
 		self.panel = wx.Panel(self)
@@ -192,6 +193,7 @@ class printWindow(wx.Frame):
 		self.sizer.Add(self.progress, pos=(7, 0), span=(1, 7), flag=wx.EXPAND)
 
 		nb = wx.Notebook(self.panel)
+		self.tabs = nb
 		self.sizer.Add(nb, pos=(0, 2), span=(7, 4), flag=wx.EXPAND)
 
 		self.temperaturePanel = wx.Panel(nb)
@@ -200,7 +202,7 @@ class printWindow(wx.Frame):
 
 		self.temperatureSelect = wx.SpinCtrl(self.temperaturePanel, -1, '0', size=(21 * 3, 21), style=wx.SP_ARROW_KEYS)
 		self.temperatureSelect.SetRange(0, 400)
-		self.temperatureHeatUpPLA = wx.Button(self.temperaturePanel, -1, '210C')
+		self.temperatureHeatUp = wx.Button(self.temperaturePanel, -1, str(int(profile.getProfileSettingFloat('print_temperature'))) + 'C')
 		self.bedTemperatureLabel = wx.StaticText(self.temperaturePanel, -1, _("BedTemp:"))
 		self.bedTemperatureSelect = wx.SpinCtrl(self.temperaturePanel, -1, '0', size=(21 * 3, 21), style=wx.SP_ARROW_KEYS)
 		self.bedTemperatureSelect.SetRange(0, 400)
@@ -211,7 +213,7 @@ class printWindow(wx.Frame):
 
 		sizer.Add(wx.StaticText(self.temperaturePanel, -1, _("Temp:")), pos=(0, 0))
 		sizer.Add(self.temperatureSelect, pos=(0, 1))
-		sizer.Add(self.temperatureHeatUpPLA, pos=(0, 2))
+		sizer.Add(self.temperatureHeatUp, pos=(0, 2))
 		sizer.Add(self.bedTemperatureLabel, pos=(1, 0))
 		sizer.Add(self.bedTemperatureSelect, pos=(1, 1))
 		sizer.Add(self.temperatureGraph, pos=(2, 0), span=(1, 3), flag=wx.EXPAND)
@@ -305,37 +307,6 @@ class printWindow(wx.Frame):
 
 		nb.AddPage(self.termPanel, _("Term"))
 
-		if self.cam is not None:
-			self.camPage = wx.Panel(nb)
-			sizer = wx.GridBagSizer(2, 2)
-			self.camPage.SetSizer(sizer)
-
-			self.timelapsEnable = wx.CheckBox(self.camPage, -1, _("Enable timelapse movie recording"))
-			self.timelapsSavePath = wx.TextCtrl(self.camPage, -1, os.path.expanduser('~/timelaps_' + datetime.datetime.now().strftime('%Y-%m-%d_%H:%M') + '.mpg'))
-			sizer.Add(self.timelapsEnable, pos=(0, 0), span=(1, 2), flag=wx.EXPAND)
-			sizer.Add(self.timelapsSavePath, pos=(1, 0), span=(1, 2), flag=wx.EXPAND)
-
-			pages = self.cam.propertyPages()
-			self.cam.buttons = [self.timelapsEnable, self.timelapsSavePath]
-			for page in pages:
-				button = wx.Button(self.camPage, -1, page)
-				button.index = pages.index(page)
-				sizer.Add(button, pos=(2, pages.index(page)))
-				button.Bind(wx.EVT_BUTTON, self.OnPropertyPageButton)
-				self.cam.buttons.append(button)
-
-			self.campreviewEnable = wx.CheckBox(self.camPage, -1, _("Show preview"))
-			sizer.Add(self.campreviewEnable, pos=(3, 0), span=(1, 2), flag=wx.EXPAND)
-
-			self.camPreview = wx.Panel(self.camPage)
-			sizer.Add(self.camPreview, pos=(4, 0), span=(1, 2), flag=wx.EXPAND)
-
-			nb.AddPage(self.camPage, _("Camera"))
-			self.camPreview.timer = wx.Timer(self)
-			self.Bind(wx.EVT_TIMER, self.OnCameraTimer, self.camPreview.timer)
-			self.camPreview.timer.Start(500)
-			self.camPreview.Bind(wx.EVT_ERASE_BACKGROUND, self.OnCameraEraseBackground)
-
 		self.sizer.AddGrowableRow(6)
 		self.sizer.AddGrowableCol(3)
 
@@ -347,7 +318,7 @@ class printWindow(wx.Frame):
 		self.cancelButton.Bind(wx.EVT_BUTTON, self.OnCancel)
 		self.machineLogButton.Bind(wx.EVT_BUTTON, self.OnMachineLog)
 
-		self.Bind(wx.EVT_BUTTON, lambda e: (self.temperatureSelect.SetValue(210), self.machineCom.sendCommand("M104 S210")), self.temperatureHeatUpPLA)
+		self.Bind(wx.EVT_BUTTON, lambda e: (self.temperatureSelect.SetValue(int(profile.getProfileSettingFloat('print_temperature'))), self.machineCom.sendCommand("M104 S%d" % (int(profile.getProfileSettingFloat('print_temperature'))))), self.temperatureHeatUp)
 		self.Bind(wx.EVT_SPINCTRL, self.OnTempChange, self.temperatureSelect)
 		self.Bind(wx.EVT_SPINCTRL, self.OnBedTempChange, self.bedTemperatureSelect)
 
@@ -371,12 +342,51 @@ class printWindow(wx.Frame):
 		self._thread.daemon = True
 		self._thread.start()
 
+		if webcam.hasWebcamSupport():
+			#Need to call the camera class on the GUI thread, or else it won't work. Shame as it hangs the GUI for about 2 seconds.
+			wx.CallAfter(self._webcamCheck)
+
 	def _stdinMonitor(self):
 		while True:
 			line = sys.stdin.readline().rstrip()
 			if line.startswith('LOAD:'):
 				if not self.LoadGCodeFile(line[5:]):
 					print 'LOADFAILED\n'
+
+	def _webcamCheck(self):
+		self.cam = webcam.webcam()
+		if self.cam.hasCamera():
+			self.camPage = wx.Panel(self.tabs)
+			sizer = wx.GridBagSizer(2, 2)
+			self.camPage.SetSizer(sizer)
+
+			self.timelapsEnable = wx.CheckBox(self.camPage, -1, _("Enable timelapse movie recording"))
+			self.timelapsSavePath = wx.TextCtrl(self.camPage, -1, os.path.expanduser('~/timelaps_' + datetime.datetime.now().strftime('%Y-%m-%d_%H:%M') + '.mpg'))
+			sizer.Add(self.timelapsEnable, pos=(0, 0), span=(1, 2), flag=wx.EXPAND)
+			sizer.Add(self.timelapsSavePath, pos=(1, 0), span=(1, 2), flag=wx.EXPAND)
+
+			pages = self.cam.propertyPages()
+			self.cam.buttons = [self.timelapsEnable, self.timelapsSavePath]
+			for page in pages:
+				button = wx.Button(self.camPage, -1, page)
+				button.index = pages.index(page)
+				sizer.Add(button, pos=(2, pages.index(page)))
+				button.Bind(wx.EVT_BUTTON, self.OnPropertyPageButton)
+				self.cam.buttons.append(button)
+
+			self.campreviewEnable = wx.CheckBox(self.camPage, -1, _("Show preview"))
+			sizer.Add(self.campreviewEnable, pos=(3, 0), span=(1, 2), flag=wx.EXPAND)
+
+			self.camPreview = wx.Panel(self.camPage)
+			sizer.Add(self.camPreview, pos=(4, 0), span=(1, 2), flag=wx.EXPAND)
+
+			self.tabs.AddPage(self.camPage, _("Camera"))
+			self.camPreview.timer = wx.Timer(self)
+			self.Bind(wx.EVT_TIMER, self.OnCameraTimer, self.camPreview.timer)
+			self.camPreview.timer.Start(500)
+			self.camPreview.Bind(wx.EVT_ERASE_BACKGROUND, self.OnCameraEraseBackground)
+		else:
+			self.cam = None
 
 	def OnCameraTimer(self, e):
 		if not self.campreviewEnable.GetValue():
@@ -408,7 +418,7 @@ class printWindow(wx.Frame):
 		#self.loadButton.Enable(self.machineCom == None or not (self.machineCom.isPrinting() or self.machineCom.isPaused()))
 		self.printButton.Enable(self.machineCom is not None and self.machineCom.isOperational() and not (
 		self.machineCom.isPrinting() or self.machineCom.isPaused()))
-		self.temperatureHeatUpPLA.Enable(self.machineCom is not None and self.machineCom.isOperational() and not (
+		self.temperatureHeatUp.Enable(self.machineCom is not None and self.machineCom.isOperational() and not (
 		self.machineCom.isPrinting() or self.machineCom.isPaused()))
 		self.pauseButton.Enable(
 			self.machineCom is not None and (self.machineCom.isPrinting() or self.machineCom.isPaused()))
